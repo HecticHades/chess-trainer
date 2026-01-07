@@ -54,7 +54,7 @@ function ChessBoard({
         onClick={handleClick}
       >
         {piece && (
-          <div className="piece">
+          <div className={`piece ${piece.color === 'w' ? 'white' : 'black'}`}>
             {PIECE_SYMBOLS[piece.color][piece.type]}
           </div>
         )}
