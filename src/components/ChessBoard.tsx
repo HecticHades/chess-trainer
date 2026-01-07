@@ -7,9 +7,9 @@ interface ChessBoardProps {
   flipped?: boolean;
   onSquareClick?: (rank: number, file: number) => void;
   selectedSquare?: { rank: number; file: number } | null;
-  legalMoves?: string[];
-  lastMove?: { from: string; to: string } | null;
-  checkSquare?: string | null;
+  legalMoves?: { rank: number; file: number }[];
+  lastMove?: { from: { rank: number; file: number }; to: { rank: number; file: number } };
+  checkSquare?: { rank: number; file: number };
 }
 
 function ChessBoard({
@@ -24,15 +24,18 @@ function ChessBoard({
   const renderSquare = (rank: number, file: number) => {
     const piece = position[rank][file];
     const isLight = (rank + file) % 2 === 0;
-    const squareName = `${FILES[file]}${8 - rank}`;
 
     const isSelected =
       selectedSquare?.rank === rank && selectedSquare?.file === file;
-    const isLegalMove = legalMoves.includes(squareName);
+    const isLegalMove = legalMoves.some(
+      (move) => move.rank === rank && move.file === file
+    );
     const isLastMove =
       lastMove &&
-      (lastMove.from === squareName || lastMove.to === squareName);
-    const isCheck = checkSquare === squareName;
+      ((lastMove.from.rank === rank && lastMove.from.file === file) ||
+        (lastMove.to.rank === rank && lastMove.to.file === file));
+    const isCheck =
+      checkSquare?.rank === rank && checkSquare?.file === file;
 
     const handleClick = () => {
       onSquareClick?.(rank, file);
