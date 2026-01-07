@@ -60,9 +60,12 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
     gameStatus,
     moveHistory,
     capturedPieces,
+    isPlayerTurn,
+    isBotThinking,
     initGame,
     selectSquare,
     resetGame,
+    makeBotMove,
   } = useGameStore();
 
   const bot = BOT_LEVELS.find((b) => b.id === botDifficulty)!;
@@ -73,7 +76,37 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
     initGame(botDifficulty, playerColor);
   }, [botDifficulty, playerColor, initGame]);
 
+  // Trigger bot move when it's bot's turn
+  useEffect(() => {
+    if (!isPlayerTurn && !isBotThinking && gameStatus === 'playing') {
+      // Add small delay for better UX (so player can see their move)
+      const timeout = setTimeout(() => {
+        makeBotMove();
+      }, 500);
+      return () => clearTimeout(timeout);
+    }
+  }, [isPlayerTurn, isBotThinking, gameStatus, makeBotMove]);
+
+  // If player is black, bot moves first
+  useEffect(() => {
+    if (
+      playerColor === 'black' &&
+      moveHistory.length === 0 &&
+      !isBotThinking &&
+      gameStatus === 'playing'
+    ) {
+      const timeout = setTimeout(() => {
+        makeBotMove();
+      }, 1000);
+      return () => clearTimeout(timeout);
+    }
+  }, [playerColor, moveHistory.length, isBotThinking, gameStatus, makeBotMove]);
+
   const handleSquareClick = (rank: number, file: number) => {
+    // Disable clicks during bot's turn or when game is over
+    if (!isPlayerTurn || isBotThinking || gameStatus !== 'playing') {
+      return;
+    }
     const square = coordsToSquare(rank, file);
     selectSquare(square);
   };
@@ -112,7 +145,9 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
 
   // Format game status display
   const getStatusDisplay = () => {
-    if (gameStatus === 'checkmate') {
+    if (isBotThinking) {
+      return { text: 'Bot thinking...', className: 'status-check' };
+    } else if (gameStatus === 'checkmate') {
       return { text: 'Checkmate!', className: 'status-checkmate' };
     } else if (gameStatus === 'check') {
       return { text: 'Check!', className: 'status-check' };
@@ -120,8 +155,10 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
       return { text: 'Stalemate', className: 'status-playing' };
     } else if (gameStatus === 'draw') {
       return { text: 'Draw', className: 'status-playing' };
+    } else if (isPlayerTurn) {
+      return { text: 'Your turn', className: 'status-playing' };
     } else {
-      return { text: 'In Progress', className: 'status-playing' };
+      return { text: "Bot's turn", className: 'status-playing' };
     }
   };
 

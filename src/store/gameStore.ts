@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { Chess } from 'chess.js';
 import { BotDifficulty } from '../types/chess';
+import { stockfishEngine } from '../engine/stockfish';
 
 interface GameState {
   // Chess.js instance
@@ -13,6 +14,7 @@ interface GameState {
   // Current game state
   fen: string;
   isPlayerTurn: boolean;
+  isBotThinking: boolean;
   gameStatus: 'playing' | 'check' | 'checkmate' | 'stalemate' | 'draw';
   winner: 'white' | 'black' | 'draw' | null;
 
@@ -32,6 +34,7 @@ interface GameState {
   initGame: (botDifficulty: BotDifficulty, playerColor: 'white' | 'black') => void;
   selectSquare: (square: string) => void;
   makeMove: (from: string, to: string, promotion?: string) => boolean;
+  makeBotMove: () => Promise<void>;
   resetGame: () => void;
   updateGameStatus: () => void;
 }
@@ -43,6 +46,7 @@ export const useGameStore = create<GameState>((set, get) => ({
   playerColor: 'white',
   fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
   isPlayerTurn: true,
+  isBotThinking: false,
   gameStatus: 'playing',
   winner: null,
   moveHistory: [],
@@ -172,5 +176,74 @@ export const useGameStore = create<GameState>((set, get) => ({
   resetGame: () => {
     const { botDifficulty, playerColor } = get();
     get().initGame(botDifficulty, playerColor);
+  },
+
+  // Make bot move using Stockfish
+  makeBotMove: async () => {
+    const { game, botDifficulty, fen, gameStatus } = get();
+
+    // Don't make a move if game is over
+    if (gameStatus === 'checkmate' || gameStatus === 'stalemate' || gameStatus === 'draw') {
+      return;
+    }
+
+    set({ isBotThinking: true });
+
+    try {
+      // Get best move from Stockfish
+      const bestMove = await stockfishEngine.getBestMove(fen, botDifficulty);
+
+      if (!bestMove || bestMove === '(none)') {
+        console.error('No valid move from Stockfish');
+        set({ isBotThinking: false });
+        return;
+      }
+
+      // Parse the move (format: "e2e4" or "e7e8q" for promotion)
+      const from = bestMove.substring(0, 2);
+      const to = bestMove.substring(2, 4);
+      const promotion = bestMove.length > 4 ? bestMove[4] : 'q';
+
+      // Make the move
+      const piece = game.get(from as any);
+      const isPromotion =
+        piece?.type === 'p' &&
+        ((piece.color === 'w' && to[1] === '8') || (piece.color === 'b' && to[1] === '1'));
+
+      const move = game.move({
+        from: from as any,
+        to: to as any,
+        promotion: isPromotion ? (promotion as any) : undefined,
+      });
+
+      if (!move) {
+        console.error('Invalid bot move:', bestMove);
+        set({ isBotThinking: false });
+        return;
+      }
+
+      // Track captured pieces
+      const capturedPieces = { ...get().capturedPieces };
+      if (move.captured) {
+        const capturedColor = move.color === 'w' ? 'black' : 'white';
+        capturedPieces[capturedColor].push(move.captured);
+      }
+
+      // Update state
+      set({
+        fen: game.fen(),
+        moveHistory: game.history(),
+        capturedPieces,
+        lastMove: { from, to },
+        isPlayerTurn: true,
+        isBotThinking: false,
+      });
+
+      // Update game status
+      get().updateGameStatus();
+    } catch (error) {
+      console.error('Error making bot move:', error);
+      set({ isBotThinking: false, isPlayerTurn: true });
+    }
   },
 }));
