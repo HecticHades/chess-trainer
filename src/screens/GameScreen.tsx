@@ -78,7 +78,11 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
 
   // Trigger bot move when it's bot's turn
   useEffect(() => {
-    if (!isPlayerTurn && !isBotThinking && gameStatus === 'playing') {
+    if (
+      !isPlayerTurn &&
+      !isBotThinking &&
+      (gameStatus === 'playing' || gameStatus === 'check')
+    ) {
       // Add small delay for better UX (so player can see their move)
       const timeout = setTimeout(() => {
         makeBotMove();
@@ -93,7 +97,7 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
       playerColor === 'black' &&
       moveHistory.length === 0 &&
       !isBotThinking &&
-      gameStatus === 'playing'
+      (gameStatus === 'playing' || gameStatus === 'check')
     ) {
       const timeout = setTimeout(() => {
         makeBotMove();
@@ -104,7 +108,11 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
 
   const handleSquareClick = (rank: number, file: number) => {
     // Disable clicks during bot's turn or when game is over
-    if (!isPlayerTurn || isBotThinking || gameStatus !== 'playing') {
+    if (
+      !isPlayerTurn ||
+      isBotThinking ||
+      (gameStatus !== 'playing' && gameStatus !== 'check')
+    ) {
       return;
     }
     const square = coordsToSquare(rank, file);

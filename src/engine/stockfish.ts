@@ -5,29 +5,68 @@ class StockfishEngine {
   private engine: Worker | null = null;
   private isReady = false;
   private pendingMessages: string[] = [];
+  private messageHandlers: ((message: string) => void)[] = [];
 
   async init() {
     if (this.engine) return;
 
-    return new Promise<void>((resolve) => {
-      // Create Stockfish worker
-      const Stockfish = require('stockfish');
-      this.engine = new Stockfish();
+    return new Promise<void>((resolve, reject) => {
+      try {
+        // Create inline worker with Stockfish WASM
+        const workerCode = `
+          // Load Stockfish from CDN
+          importScripts('https://cdn.jsdelivr.net/npm/stockfish@16.0.0/stockfish.js');
 
-      this.engine!.onmessage = (event: MessageEvent) => {
-        const message = event.data || event;
+          let stockfish;
 
-        if (message === 'uciok') {
-          this.isReady = true;
-          // Process any pending messages
-          this.pendingMessages.forEach((msg) => this.send(msg));
-          this.pendingMessages = [];
-          resolve();
-        }
-      };
+          self.onmessage = function(e) {
+            const msg = e.data;
 
-      // Initialize UCI protocol
-      this.send('uci');
+            if (msg === 'init') {
+              Stockfish().then(sf => {
+                stockfish = sf;
+                stockfish.addMessageListener(line => {
+                  self.postMessage(line);
+                });
+                self.postMessage('ready');
+              });
+            } else if (stockfish) {
+              stockfish.postMessage(msg);
+            }
+          };
+        `;
+
+        const blob = new Blob([workerCode], { type: 'application/javascript' });
+        const workerUrl = URL.createObjectURL(blob);
+        this.engine = new Worker(workerUrl);
+
+        this.engine.onmessage = (event: MessageEvent) => {
+          const message = event.data;
+
+          if (message === 'ready') {
+            this.send('uci');
+          } else if (message === 'uciok') {
+            this.isReady = true;
+            this.pendingMessages.forEach((msg) => this.send(msg));
+            this.pendingMessages = [];
+            resolve();
+          }
+
+          // Call registered handlers
+          this.messageHandlers.forEach((handler) => handler(message));
+        };
+
+        this.engine.onerror = (error) => {
+          console.error('Stockfish worker error:', error);
+          reject(error);
+        };
+
+        // Initialize the worker
+        this.engine.postMessage('init');
+      } catch (error) {
+        console.error('Failed to initialize Stockfish:', error);
+        reject(error);
+      }
     });
   }
 
@@ -55,31 +94,26 @@ class StockfishEngine {
 
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
+        this.messageHandlers = this.messageHandlers.filter((h) => h !== messageHandler);
         reject(new Error('Stockfish timeout'));
       }, 30000); // 30 second timeout
 
-      let bestMove = '';
-
-      const messageHandler = (event: MessageEvent) => {
-        const message = event.data || event;
-
+      const messageHandler = (message: string) => {
         // Look for bestmove response
         if (typeof message === 'string' && message.startsWith('bestmove')) {
           clearTimeout(timeout);
           const parts = message.split(' ');
-          bestMove = parts[1];
+          const bestMove = parts[1];
 
-          if (this.engine) {
-            this.engine.removeEventListener('message', messageHandler);
-          }
+          // Remove this handler
+          this.messageHandlers = this.messageHandlers.filter((h) => h !== messageHandler);
 
           resolve(bestMove);
         }
       };
 
-      if (this.engine) {
-        this.engine.addEventListener('message', messageHandler);
-      }
+      // Register message handler
+      this.messageHandlers.push(messageHandler);
 
       // Configure Stockfish based on difficulty
       this.send('ucinewgame');

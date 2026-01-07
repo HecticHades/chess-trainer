@@ -182,16 +182,22 @@ export const useGameStore = create<GameState>((set, get) => ({
   makeBotMove: async () => {
     const { game, botDifficulty, fen, gameStatus } = get();
 
+    console.log('Bot attempting to move. Status:', gameStatus, 'FEN:', fen);
+
     // Don't make a move if game is over
     if (gameStatus === 'checkmate' || gameStatus === 'stalemate' || gameStatus === 'draw') {
+      console.log('Game is over, bot will not move');
       return;
     }
 
     set({ isBotThinking: true });
 
     try {
+      console.log('Getting best move from Stockfish for', botDifficulty);
       // Get best move from Stockfish
       const bestMove = await stockfishEngine.getBestMove(fen, botDifficulty);
+
+      console.log('Stockfish returned move:', bestMove);
 
       if (!bestMove || bestMove === '(none)') {
         console.error('No valid move from Stockfish');
