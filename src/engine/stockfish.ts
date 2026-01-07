@@ -1,188 +1,125 @@
+import { Chess } from 'chess.js';
 import { BotDifficulty } from '../types/chess';
-import { BOT_LEVELS } from '../utils/constants';
 
-class StockfishEngine {
-  private engine: Worker | null = null;
-  private isReady = false;
-  private pendingMessages: string[] = [];
-  private messageHandlers: ((message: string) => void)[] = [];
-
-  async init() {
-    if (this.engine) return;
-
-    return new Promise<void>((resolve, reject) => {
-      try {
-        // Create inline worker with Stockfish WASM
-        const workerCode = `
-          // Load Stockfish from CDN
-          importScripts('https://cdn.jsdelivr.net/npm/stockfish@16.0.0/stockfish.js');
-
-          let stockfish;
-
-          self.onmessage = function(e) {
-            const msg = e.data;
-
-            if (msg === 'init') {
-              Stockfish().then(sf => {
-                stockfish = sf;
-                stockfish.addMessageListener(line => {
-                  self.postMessage(line);
-                });
-                self.postMessage('ready');
-              });
-            } else if (stockfish) {
-              stockfish.postMessage(msg);
-            }
-          };
-        `;
-
-        const blob = new Blob([workerCode], { type: 'application/javascript' });
-        const workerUrl = URL.createObjectURL(blob);
-        this.engine = new Worker(workerUrl);
-
-        this.engine.onmessage = (event: MessageEvent) => {
-          const message = event.data;
-
-          if (message === 'ready') {
-            this.send('uci');
-          } else if (message === 'uciok') {
-            this.isReady = true;
-            this.pendingMessages.forEach((msg) => this.send(msg));
-            this.pendingMessages = [];
-            resolve();
-          }
-
-          // Call registered handlers
-          this.messageHandlers.forEach((handler) => handler(message));
-        };
-
-        this.engine.onerror = (error) => {
-          console.error('Stockfish worker error:', error);
-          reject(error);
-        };
-
-        // Initialize the worker
-        this.engine.postMessage('init');
-      } catch (error) {
-        console.error('Failed to initialize Stockfish:', error);
-        reject(error);
-      }
-    });
-  }
-
-  private send(command: string) {
-    if (!this.engine) {
-      console.error('Stockfish engine not initialized');
-      return;
-    }
-
-    if (!this.isReady && command !== 'uci') {
-      this.pendingMessages.push(command);
-      return;
-    }
-
-    this.engine.postMessage(command);
-  }
+// Simple chess AI engine using minimax-style evaluation
+class ChessEngine {
+  // Piece values for evaluation
+  private pieceValues: { [key: string]: number } = {
+    p: 1,
+    n: 3,
+    b: 3,
+    r: 5,
+    q: 9,
+    k: 0,
+  };
 
   async getBestMove(fen: string, difficulty: BotDifficulty): Promise<string> {
-    if (!this.engine) {
-      await this.init();
+    const game = new Chess(fen);
+    const moves = game.moves({ verbose: true });
+
+    if (moves.length === 0) {
+      throw new Error('No legal moves available');
     }
 
-    const bot = BOT_LEVELS.find((b) => b.id === difficulty);
-    if (!bot) throw new Error('Invalid bot difficulty');
+    // Get difficulty settings
+    const settings = this.getDifficultySettings(difficulty);
 
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.messageHandlers = this.messageHandlers.filter((h) => h !== messageHandler);
-        reject(new Error('Stockfish timeout'));
-      }, 30000); // 30 second timeout
+    // Sometimes make random moves based on difficulty
+    if (Math.random() < settings.randomness) {
+      const randomMove = moves[Math.floor(Math.random() * moves.length)];
+      return `${randomMove.from}${randomMove.to}${randomMove.promotion || ''}`;
+    }
 
-      const messageHandler = (message: string) => {
-        // Look for bestmove response
-        if (typeof message === 'string' && message.startsWith('bestmove')) {
-          clearTimeout(timeout);
-          const parts = message.split(' ');
-          const bestMove = parts[1];
+    // Evaluate moves and pick the best one
+    let bestMove = moves[0];
+    let bestScore = -Infinity;
 
-          // Remove this handler
-          this.messageHandlers = this.messageHandlers.filter((h) => h !== messageHandler);
+    for (const move of moves) {
+      const testGame = new Chess(fen);
+      testGame.move(move);
 
-          resolve(bestMove);
-        }
-      };
+      let score = this.evaluatePosition(testGame, settings.depth);
 
-      // Register message handler
-      this.messageHandlers.push(messageHandler);
+      // Add some randomness to make it less perfect
+      score += (Math.random() - 0.5) * settings.randomFactor;
 
-      // Configure Stockfish based on difficulty
-      this.send('ucinewgame');
-      this.send('isready');
-
-      // Set skill level (0-20, where 20 is strongest)
-      const skillLevel = this.getSkillLevel(difficulty);
-      this.send(`setoption name Skill Level value ${skillLevel}`);
-
-      // Set position
-      this.send(`position fen ${fen}`);
-
-      // Start calculation with depth limit
-      const depth = bot.depth;
-      const moveTime = this.getMoveTime(difficulty);
-
-      if (depth <= 5) {
-        // For lower difficulties, use depth
-        this.send(`go depth ${depth}`);
-      } else {
-        // For higher difficulties, use time-based search
-        this.send(`go movetime ${moveTime}`);
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = move;
       }
-    });
+    }
+
+    return `${bestMove.from}${bestMove.to}${bestMove.promotion || ''}`;
   }
 
-  private getSkillLevel(difficulty: BotDifficulty): number {
+  private getDifficultySettings(difficulty: BotDifficulty) {
     switch (difficulty) {
       case 'beginner':
-        return 0; // Weakest
+        return { depth: 1, randomness: 0.7, randomFactor: 5 }; // 70% random moves
       case 'intermediate':
-        return 5;
+        return { depth: 1, randomness: 0.3, randomFactor: 3 }; // 30% random moves
       case 'advanced':
-        return 10;
+        return { depth: 2, randomness: 0.1, randomFactor: 1 }; // 10% random moves
       case 'expert':
-        return 15;
+        return { depth: 2, randomness: 0.05, randomFactor: 0.5 }; // 5% random moves
       case 'master':
-        return 20; // Strongest
+        return { depth: 3, randomness: 0, randomFactor: 0.2 }; // No random moves
       default:
-        return 10;
+        return { depth: 1, randomness: 0.3, randomFactor: 3 };
     }
   }
 
-  private getMoveTime(difficulty: BotDifficulty): number {
-    // Move time in milliseconds
-    switch (difficulty) {
-      case 'beginner':
-        return 100;
-      case 'intermediate':
-        return 500;
-      case 'advanced':
-        return 1000;
-      case 'expert':
-        return 2000;
-      case 'master':
-        return 3000;
-      default:
-        return 1000;
+  private evaluatePosition(game: Chess, depth: number): number {
+    // Check terminal conditions
+    if (game.isCheckmate()) {
+      return game.turn() === 'w' ? -10000 : 10000;
     }
+    if (game.isStalemate() || game.isDraw()) {
+      return 0;
+    }
+
+    // Base evaluation: material count
+    let score = this.evaluateMaterial(game);
+
+    // Add bonuses for good moves
+    if (game.isCheck()) {
+      score += game.turn() === 'w' ? -50 : 50; // Bonus for putting opponent in check
+    }
+
+    // Simple depth search
+    if (depth > 1) {
+      const moves = game.moves({ verbose: true });
+      let bestScore = -Infinity;
+
+      for (const move of moves.slice(0, 10)) { // Limit to 10 moves for performance
+        const testGame = new Chess(game.fen());
+        testGame.move(move);
+        const moveScore = -this.evaluatePosition(testGame, depth - 1);
+        bestScore = Math.max(bestScore, moveScore);
+      }
+
+      score = bestScore;
+    }
+
+    return score;
   }
 
-  terminate() {
-    if (this.engine) {
-      this.send('quit');
-      this.engine = null;
-      this.isReady = false;
+  private evaluateMaterial(game: Chess): number {
+    const board = game.board();
+    let score = 0;
+
+    for (const row of board) {
+      for (const square of row) {
+        if (square) {
+          const value = this.pieceValues[square.type];
+          score += square.color === 'b' ? value : -value;
+        }
+      }
     }
+
+    return score;
   }
 }
 
 // Singleton instance
-export const stockfishEngine = new StockfishEngine();
+export const stockfishEngine = new ChessEngine();
