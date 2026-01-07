@@ -1,0 +1,153 @@
+.chess-board {
+  display: inline-block;
+  border: 3px solid var(--bg-tertiary);
+  border-radius: 4px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
+.board-row {
+  display: flex;
+}
+
+.square {
+  width: 70px;
+  height: 70px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background-color 0.2s;
+}
+
+.square.light {
+  background-color: var(--square-light);
+}
+
+.square.dark {
+  background-color: var(--square-dark);
+}
+
+.square:hover {
+  opacity: 0.9;
+}
+
+.square.selected {
+  background-color: var(--highlight) !important;
+  box-shadow: inset 0 0 0 3px rgba(255, 255, 0, 0.6);
+}
+
+.square.last-move {
+  background-color: rgba(255, 255, 0, 0.25) !important;
+}
+
+.square.check {
+  background: radial-gradient(
+    circle,
+    var(--check) 0%,
+    transparent 100%
+  ) !important;
+  animation: pulse-check 1s ease-in-out infinite;
+}
+
+@keyframes pulse-check {
+  0%, 100% {
+    box-shadow: inset 0 0 0 2px rgba(255, 0, 0, 0.8);
+  }
+  50% {
+    box-shadow: inset 0 0 0 4px rgba(255, 0, 0, 1);
+  }
+}
+
+/* Piece */
+.piece {
+  font-size: 48px;
+  line-height: 1;
+  cursor: grab;
+  transition: transform 0.1s;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+}
+
+.piece:active {
+  cursor: grabbing;
+  transform: scale(1.1);
+}
+
+/* Legal move indicator */
+.legal-move-indicator {
+  position: absolute;
+  width: 25%;
+  height: 25%;
+  background-color: var(--legal-move);
+  border-radius: 50%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.square:has(.piece) .legal-move-indicator {
+  width: 100%;
+  height: 100%;
+  background-color: transparent;
+  border: 3px solid var(--legal-move);
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+/* Coordinates */
+.rank-label,
+.file-label {
+  position: absolute;
+  font-size: 12px;
+  font-weight: 700;
+  pointer-events: none;
+  user-select: none;
+}
+
+.square.light .rank-label,
+.square.light .file-label {
+  color: var(--square-dark);
+}
+
+.square.dark .rank-label,
+.square.dark .file-label {
+  color: var(--square-light);
+}
+
+.rank-label {
+  top: 4px;
+  left: 4px;
+}
+
+.file-label {
+  bottom: 4px;
+  right: 4px;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+  .square {
+    width: 45px;
+    height: 45px;
+  }
+
+  .piece {
+    font-size: 32px;
+  }
+
+  .rank-label,
+  .file-label {
+    font-size: 9px;
+  }
+}
+
+@media (min-width: 1200px) {
+  .square {
+    width: 80px;
+    height: 80px;
+  }
+
+  .piece {
+    font-size: 56px;
+  }
+}
