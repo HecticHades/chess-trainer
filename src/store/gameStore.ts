@@ -35,6 +35,8 @@ interface GameState {
   selectSquare: (square: string) => void;
   makeMove: (from: string, to: string, promotion?: string) => boolean;
   makeBotMove: () => Promise<void>;
+  undoMove: () => void;
+  resign: () => void;
   resetGame: () => void;
   updateGameStatus: () => void;
 }
@@ -172,35 +174,77 @@ export const useGameStore = create<GameState>((set, get) => ({
     }
   },
 
+  // Undo last move (undo both player and bot moves)
+  undoMove: () => {
+    const { game, playerColor, moveHistory } = get();
+
+    if (moveHistory.length === 0) return;
+
+    // Undo twice to undo both player and bot moves
+    game.undo(); // Undo bot move
+    if (moveHistory.length > 1) {
+      game.undo(); // Undo player move
+    }
+
+    // Recalculate captured pieces
+    const capturedPieces: { white: string[]; black: string[] } = { white: [], black: [] };
+    const history = game.history({ verbose: true });
+    history.forEach((move) => {
+      if (move.captured) {
+        const capturedColor = move.color === 'w' ? 'black' : 'white';
+        capturedPieces[capturedColor].push(move.captured);
+      }
+    });
+
+    set({
+      fen: game.fen(),
+      moveHistory: game.history(),
+      capturedPieces,
+      lastMove: null,
+      selectedSquare: null,
+      legalMoves: [],
+      isPlayerTurn: playerColor === 'white' ? game.turn() === 'w' : game.turn() === 'b',
+      gameStatus: 'playing',
+      winner: null,
+    });
+
+    get().updateGameStatus();
+  },
+
+  // Resign the game
+  resign: () => {
+    const { playerColor } = get();
+    const winner = playerColor === 'white' ? 'black' : 'white';
+    set({
+      gameStatus: 'checkmate',
+      winner,
+      isPlayerTurn: false,
+    });
+  },
+
   // Reset game
   resetGame: () => {
     const { botDifficulty, playerColor } = get();
     get().initGame(botDifficulty, playerColor);
   },
 
-  // Make bot move using Stockfish
+  // Make bot move using chess engine
   makeBotMove: async () => {
     const { game, botDifficulty, fen, gameStatus } = get();
 
-    console.log('Bot attempting to move. Status:', gameStatus, 'FEN:', fen);
-
     // Don't make a move if game is over
     if (gameStatus === 'checkmate' || gameStatus === 'stalemate' || gameStatus === 'draw') {
-      console.log('Game is over, bot will not move');
       return;
     }
 
     set({ isBotThinking: true });
 
     try {
-      console.log('Getting best move from Stockfish for', botDifficulty);
-      // Get best move from Stockfish
+      // Get best move from chess engine
       const bestMove = await stockfishEngine.getBestMove(fen, botDifficulty);
 
-      console.log('Stockfish returned move:', bestMove);
-
       if (!bestMove || bestMove === '(none)') {
-        console.error('No valid move from Stockfish');
+        console.error('No valid move from engine');
         set({ isBotThinking: false });
         return;
       }

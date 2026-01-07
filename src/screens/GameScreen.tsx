@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import ChessBoard from '../components/ChessBoard';
+import GameResultModal from '../components/GameResultModal';
 import { BotDifficulty, ChessPiece } from '../types/chess';
 import { BOT_LEVELS } from '../utils/constants';
 import { useGameStore } from '../store/gameStore';
@@ -58,6 +59,7 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
     legalMoves,
     lastMove,
     gameStatus,
+    winner,
     moveHistory,
     capturedPieces,
     isPlayerTurn,
@@ -66,7 +68,11 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
     selectSquare,
     resetGame,
     makeBotMove,
+    undoMove,
+    resign,
   } = useGameStore();
+
+  const [showResultModal, setShowResultModal] = useState(false);
 
   const bot = BOT_LEVELS.find((b) => b.id === botDifficulty)!;
   const isFlipped = playerColor === 'black';
@@ -105,6 +111,16 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
       return () => clearTimeout(timeout);
     }
   }, [playerColor, moveHistory.length, isBotThinking, gameStatus, makeBotMove]);
+
+  // Show result modal when game ends
+  useEffect(() => {
+    if (gameStatus === 'checkmate' || gameStatus === 'stalemate' || gameStatus === 'draw') {
+      const timeout = setTimeout(() => {
+        setShowResultModal(true);
+      }, 1000); // Show modal after 1 second delay
+      return () => clearTimeout(timeout);
+    }
+  }, [gameStatus]);
 
   const handleSquareClick = (rank: number, file: number) => {
     // Disable clicks during bot's turn or when game is over
@@ -187,6 +203,39 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
 
   const formattedMoves = formatMoveHistory();
 
+  // Get game result for modal
+  const getGameResult = (): { result: 'win' | 'loss' | 'draw'; reason: string } => {
+    if (gameStatus === 'checkmate') {
+      const playerWon =
+        (playerColor === 'white' && winner === 'white') ||
+        (playerColor === 'black' && winner === 'black');
+      return {
+        result: playerWon ? 'win' : 'loss',
+        reason: playerWon ? `You checkmated ${bot.name}!` : `${bot.name} checkmated you!`,
+      };
+    } else if (gameStatus === 'stalemate') {
+      return {
+        result: 'draw',
+        reason: 'Stalemate - No legal moves available',
+      };
+    } else if (gameStatus === 'draw') {
+      return {
+        result: 'draw',
+        reason: 'Draw by insufficient material or repetition',
+      };
+    }
+    return { result: 'draw', reason: 'Game ended' };
+  };
+
+  const gameResult = getGameResult();
+
+  // Handle resign with confirmation
+  const handleResign = () => {
+    if (window.confirm('Are you sure you want to resign?')) {
+      resign();
+    }
+  };
+
   // Render captured pieces with Unicode symbols
   const PIECE_SYMBOLS = {
     p: '♟',
@@ -259,10 +308,21 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
           </div>
 
           <div className="game-controls">
+            <button
+              className="btn btn-secondary"
+              onClick={undoMove}
+              disabled={moveHistory.length === 0 || !isPlayerTurn || isBotThinking}
+            >
+              Undo Move
+            </button>
             <button className="btn btn-secondary" onClick={resetGame}>
               New Game
             </button>
-            <button className="btn btn-danger" disabled>
+            <button
+              className="btn btn-danger"
+              onClick={handleResign}
+              disabled={gameStatus !== 'playing' && gameStatus !== 'check'}
+            >
               Resign
             </button>
           </div>
@@ -302,6 +362,17 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
           </div>
         </div>
       </div>
+
+      <GameResultModal
+        isOpen={showResultModal}
+        result={gameResult.result}
+        reason={gameResult.reason}
+        onNewGame={() => {
+          setShowResultModal(false);
+          resetGame();
+        }}
+        onExit={onExit}
+      />
     </div>
   );
 }
