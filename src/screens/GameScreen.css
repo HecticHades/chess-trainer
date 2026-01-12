@@ -86,6 +86,27 @@
   color: var(--text-primary);
 }
 
+.evaluation-item {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+}
+
+.evaluation-bar {
+  width: 100%;
+  height: 8px;
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  overflow: hidden;
+  margin-top: 0.25rem;
+}
+
+.evaluation-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #f44336, #ffeb3b, #4caf50);
+  transition: width 0.3s ease;
+}
+
 .status-playing {
   color: var(--accent-primary);
 }
@@ -164,6 +185,18 @@
   gap: 0.75rem;
 }
 
+.hint-display {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-size: 0.875rem;
+}
+
 .game-controls .btn {
   width: 100%;
   padding: 0.75rem;
@@ -179,6 +212,35 @@
   color: var(--text-secondary);
   font-size: 0.875rem;
   line-height: 1.5;
+}
+
+.pgn-textarea {
+  width: 100%;
+  background: var(--bg-tertiary);
+  border: 1px solid var(--bg-tertiary);
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 0.75rem;
+  font-family: 'Courier New', monospace;
+  margin: 0.75rem 0;
+  resize: vertical;
+}
+
+.pgn-textarea:focus {
+  outline: 2px solid var(--accent-primary);
+}
+
+.pgn-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.pv-line {
+  margin-top: 0.75rem;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  word-break: break-word;
 }
 
 /* Empty State */

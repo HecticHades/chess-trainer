@@ -2,6 +2,8 @@ import { create } from 'zustand';
 import { Chess } from 'chess.js';
 import { BotDifficulty } from '../types/chess';
 import { stockfishEngine } from '../engine/stockfish';
+import { STARTING_FEN } from '../utils/constants';
+import type { EngineEvaluation } from '../engine/stockfish';
 
 interface GameState {
   // Chess.js instance
@@ -17,6 +19,9 @@ interface GameState {
   isBotThinking: boolean;
   gameStatus: 'playing' | 'check' | 'checkmate' | 'stalemate' | 'draw';
   winner: 'white' | 'black' | 'draw' | null;
+  engineEvaluation: EngineEvaluation;
+  hintMove: string | null;
+  pgn: string;
 
   // Move tracking
   moveHistory: string[];
@@ -35,10 +40,13 @@ interface GameState {
   selectSquare: (square: string) => void;
   makeMove: (from: string, to: string, promotion?: string) => boolean;
   makeBotMove: () => Promise<void>;
+  requestHint: () => Promise<void>;
+  clearHint: () => void;
   undoMove: () => void;
   resign: () => void;
   resetGame: () => void;
   updateGameStatus: () => void;
+  loadPgn: (pgn: string) => boolean;
 }
 
 export const useGameStore = create<GameState>((set, get) => ({
@@ -46,11 +54,14 @@ export const useGameStore = create<GameState>((set, get) => ({
   game: new Chess(),
   botDifficulty: 'beginner',
   playerColor: 'white',
-  fen: 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1',
+  fen: STARTING_FEN,
   isPlayerTurn: true,
   isBotThinking: false,
   gameStatus: 'playing',
   winner: null,
+  engineEvaluation: { score: null, mate: null, pv: null },
+  hintMove: null,
+  pgn: '',
   moveHistory: [],
   capturedPieces: { white: [], black: [] },
   selectedSquare: null,
@@ -60,12 +71,16 @@ export const useGameStore = create<GameState>((set, get) => ({
   // Initialize new game
   initGame: (botDifficulty, playerColor) => {
     const game = new Chess();
+    stockfishEngine.reset();
     set({
       game,
       botDifficulty,
       playerColor,
       fen: game.fen(),
+      pgn: game.pgn(),
       isPlayerTurn: playerColor === 'white',
+      engineEvaluation: { score: null, mate: null, pv: null },
+      hintMove: null,
       gameStatus: 'playing',
       winner: null,
       moveHistory: [],
@@ -143,7 +158,10 @@ export const useGameStore = create<GameState>((set, get) => ({
         moveHistory: game.history(),
         capturedPieces,
         lastMove: { from, to },
+        pgn: game.pgn(),
         isPlayerTurn: false,
+        engineEvaluation: { score: null, mate: null, pv: null },
+        hintMove: null,
       });
 
       // Update game status
@@ -172,6 +190,24 @@ export const useGameStore = create<GameState>((set, get) => ({
     } else {
       set({ gameStatus: 'playing' });
     }
+  },
+
+  requestHint: async () => {
+    const { botDifficulty, fen, gameStatus, isBotThinking } = get();
+    if (isBotThinking || (gameStatus !== 'playing' && gameStatus !== 'check')) {
+      return;
+    }
+
+    try {
+      const { move, evaluation } = await stockfishEngine.getBestMove(fen, botDifficulty);
+      set({ hintMove: move, engineEvaluation: evaluation });
+    } catch (error) {
+      console.error('Error requesting hint:', error);
+    }
+  },
+
+  clearHint: () => {
+    set({ hintMove: null });
   },
 
   // Undo last move (undo both player and bot moves)
@@ -206,6 +242,9 @@ export const useGameStore = create<GameState>((set, get) => ({
       isPlayerTurn: playerColor === 'white' ? game.turn() === 'w' : game.turn() === 'b',
       gameStatus: 'playing',
       winner: null,
+      engineEvaluation: { score: null, mate: null, pv: null },
+      hintMove: null,
+      pgn: game.pgn(),
     });
 
     get().updateGameStatus();
@@ -241,7 +280,10 @@ export const useGameStore = create<GameState>((set, get) => ({
 
     try {
       // Get best move from chess engine
-      const bestMove = await stockfishEngine.getBestMove(fen, botDifficulty);
+      const { move: bestMove, evaluation } = await stockfishEngine.getBestMove(
+        fen,
+        botDifficulty
+      );
 
       if (!bestMove || bestMove === '(none)') {
         console.error('No valid move from engine');
@@ -287,6 +329,9 @@ export const useGameStore = create<GameState>((set, get) => ({
         lastMove: { from, to },
         isPlayerTurn: true,
         isBotThinking: false,
+        engineEvaluation: evaluation,
+        hintMove: null,
+        pgn: game.pgn(),
       });
 
       // Update game status
@@ -295,5 +340,55 @@ export const useGameStore = create<GameState>((set, get) => ({
       console.error('Error making bot move:', error);
       set({ isBotThinking: false, isPlayerTurn: true });
     }
+  },
+
+  loadPgn: (pgn: string) => {
+    const { game, playerColor } = get();
+    const trimmedPgn = pgn.trim();
+    if (!trimmedPgn) {
+      return false;
+    }
+
+    let loaded = false;
+    try {
+      loaded = game.loadPgn(trimmedPgn);
+    } catch (error) {
+      console.error('Failed to load PGN:', error);
+      return false;
+    }
+
+    if (!loaded) {
+      return false;
+    }
+
+    const capturedPieces: { white: string[]; black: string[] } = { white: [], black: [] };
+    const history = game.history({ verbose: true });
+    history.forEach((move) => {
+      if (move.captured) {
+        const capturedColor = move.color === 'w' ? 'black' : 'white';
+        capturedPieces[capturedColor].push(move.captured);
+      }
+    });
+
+    set({
+      fen: game.fen(),
+      moveHistory: game.history(),
+      capturedPieces,
+      lastMove: history.length
+        ? { from: history[history.length - 1].from, to: history[history.length - 1].to }
+        : null,
+      selectedSquare: null,
+      legalMoves: [],
+      isPlayerTurn: playerColor === 'white' ? game.turn() === 'w' : game.turn() === 'b',
+      gameStatus: 'playing',
+      winner: null,
+      engineEvaluation: { score: null, mate: null, pv: null },
+      hintMove: null,
+      pgn: game.pgn(),
+    });
+
+    stockfishEngine.reset();
+    get().updateGameStatus();
+    return true;
   },
 }));

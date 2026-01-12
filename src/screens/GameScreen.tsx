@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import ChessBoard from '../components/ChessBoard';
 import GameResultModal from '../components/GameResultModal';
 import { BotDifficulty, ChessPiece } from '../types/chess';
@@ -12,14 +12,17 @@ interface GameScreenProps {
   onExit: () => void;
 }
 
-// Helper function to parse FEN and create board position
-function fenToPosition(fen: string): (ChessPiece | null)[][] {
+const FILES = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+
+function fenToPositionWithKing(fen: string) {
   const position: (ChessPiece | null)[][] = Array(8)
     .fill(null)
     .map(() => Array(8).fill(null));
-
   const [boardPart] = fen.split(' ');
   const ranks = boardPart.split('/');
+  const currentTurn = fen.split(' ')[1];
+  const kingColor = currentTurn === 'w' ? 'w' : 'b';
+  let kingSquare: { rank: number; file: number } | undefined;
 
   ranks.forEach((rank, rankIndex) => {
     let fileIndex = 0;
@@ -30,24 +33,25 @@ function fenToPosition(fen: string): (ChessPiece | null)[][] {
         const color = char === char.toUpperCase() ? 'w' : 'b';
         const type = char.toLowerCase() as ChessPiece['type'];
         position[rankIndex][fileIndex] = { type, color };
+        if (type === 'k' && color === kingColor) {
+          kingSquare = { rank: rankIndex, file: fileIndex };
+        }
         fileIndex++;
       }
     }
   });
 
-  return position;
+  return { position, kingSquare };
 }
 
 // Helper to convert board coordinates to chess notation (e.g., [0,0] -> 'a8')
 function coordsToSquare(rank: number, file: number): string {
-  const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-  return `${files[file]}${8 - rank}`;
+  return `${FILES[file]}${8 - rank}`;
 }
 
 // Helper to convert chess notation to board coordinates
 function squareToCoords(square: string): { rank: number; file: number } {
-  const files = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
-  const file = files.indexOf(square[0]);
+  const file = FILES.indexOf(square[0]);
   const rank = 8 - parseInt(square[1]);
   return { rank, file };
 }
@@ -64,15 +68,22 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
     capturedPieces,
     isPlayerTurn,
     isBotThinking,
+    engineEvaluation,
+    hintMove,
+    pgn,
     initGame,
     selectSquare,
     resetGame,
     makeBotMove,
+    requestHint,
+    clearHint,
     undoMove,
     resign,
+    loadPgn,
   } = useGameStore();
 
   const [showResultModal, setShowResultModal] = useState(false);
+  const [pgnInput, setPgnInput] = useState('');
 
   const bot = BOT_LEVELS.find((b) => b.id === botDifficulty)!;
   const isFlipped = playerColor === 'black';
@@ -81,6 +92,10 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
   useEffect(() => {
     initGame(botDifficulty, playerColor);
   }, [botDifficulty, playerColor, initGame]);
+
+  useEffect(() => {
+    setPgnInput(pgn);
+  }, [pgn]);
 
   // Trigger bot move when it's bot's turn
   useEffect(() => {
@@ -122,7 +137,8 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
     }
   }, [gameStatus]);
 
-  const handleSquareClick = (rank: number, file: number) => {
+  const handleSquareClick = useCallback(
+    (rank: number, file: number) => {
     // Disable clicks during bot's turn or when game is over
     if (
       !isPlayerTurn ||
@@ -133,39 +149,38 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
     }
     const square = coordsToSquare(rank, file);
     selectSquare(square);
-  };
+  },
+    [isPlayerTurn, isBotThinking, gameStatus, selectSquare]
+  );
 
   // Convert selected square and legal moves to board coordinates
-  const selectedCoords = selectedSquare ? squareToCoords(selectedSquare) : null;
-  const legalMoveCoords = legalMoves.map((square) => squareToCoords(square));
-  const lastMoveCoords = lastMove
-    ? {
-        from: squareToCoords(lastMove.from),
-        to: squareToCoords(lastMove.to),
-      }
-    : undefined;
+  const selectedCoords = useMemo(
+    () => (selectedSquare ? squareToCoords(selectedSquare) : null),
+    [selectedSquare]
+  );
+  const legalMoveCoords = useMemo(
+    () => legalMoves.map((square) => squareToCoords(square)),
+    [legalMoves]
+  );
+  const lastMoveCoords = useMemo(
+    () =>
+      lastMove
+        ? {
+            from: squareToCoords(lastMove.from),
+            to: squareToCoords(lastMove.to),
+          }
+        : undefined,
+    [lastMove]
+  );
 
   // Get check square if in check
-  const checkSquare =
-    gameStatus === 'check' || gameStatus === 'checkmate'
-      ? (() => {
-          // Find the king's square
-          const position = fenToPosition(fen);
-          const currentTurn = fen.split(' ')[1];
-          const kingColor = currentTurn === 'w' ? 'w' : 'b';
-          for (let rank = 0; rank < 8; rank++) {
-            for (let file = 0; file < 8; file++) {
-              const piece = position[rank][file];
-              if (piece?.type === 'k' && piece.color === kingColor) {
-                return { rank, file };
-              }
-            }
-          }
-          return undefined;
-        })()
-      : undefined;
-
-  const position = fenToPosition(fen);
+  const { position, kingSquare } = useMemo(() => fenToPositionWithKing(fen), [fen]);
+  const checkSquare = useMemo(() => {
+    if (!(gameStatus === 'check' || gameStatus === 'checkmate')) {
+      return undefined;
+    }
+    return kingSquare;
+  }, [gameStatus, kingSquare]);
 
   // Format game status display
   const getStatusDisplay = () => {
@@ -189,7 +204,7 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
   const status = getStatusDisplay();
 
   // Format move history (group by move number)
-  const formatMoveHistory = () => {
+  const formattedMoves = useMemo(() => {
     const moves: { moveNumber: number; white: string; black?: string }[] = [];
     for (let i = 0; i < moveHistory.length; i += 2) {
       moves.push({
@@ -199,9 +214,7 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
       });
     }
     return moves;
-  };
-
-  const formattedMoves = formatMoveHistory();
+  }, [moveHistory]);
 
   // Get game result for modal
   const getGameResult = (): { result: 'win' | 'loss' | 'draw'; reason: string } => {
@@ -257,6 +270,51 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
     ));
   };
 
+  const handleCopyPgn = async () => {
+    try {
+      await navigator.clipboard.writeText(pgn);
+    } catch (error) {
+      console.error('Failed to copy PGN:', error);
+    }
+  };
+
+  const handleLoadPgn = () => {
+    const success = loadPgn(pgnInput);
+    if (!success) {
+      alert('Invalid PGN. Please check the notation and try again.');
+    }
+  };
+
+  const renderEvaluation = () => {
+    if (engineEvaluation.mate !== null) {
+      const mateValue =
+        (playerColor === 'white' ? engineEvaluation.mate : -engineEvaluation.mate) ?? 0;
+      return `Mate in ${mateValue}`;
+    }
+    if (engineEvaluation.score !== null) {
+      const normalized =
+        playerColor === 'white' ? engineEvaluation.score : -engineEvaluation.score;
+      const score = (normalized / 100).toFixed(2);
+      return `${score} eval`;
+    }
+    return 'No eval yet';
+  };
+
+  const evaluationValue = useMemo(() => {
+    if (engineEvaluation.mate !== null) {
+      const mateValue =
+        playerColor === 'white' ? engineEvaluation.mate : -engineEvaluation.mate;
+      return mateValue > 0 ? 100 : 0;
+    }
+    if (engineEvaluation.score === null) {
+      return 50;
+    }
+    const normalized =
+      playerColor === 'white' ? engineEvaluation.score : -engineEvaluation.score;
+    const clamped = Math.max(-1000, Math.min(1000, normalized));
+    return ((clamped + 1000) / 2000) * 100;
+  }, [engineEvaluation, playerColor]);
+
   return (
     <div className="game-screen">
       <div className="game-header">
@@ -286,6 +344,13 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
             <div className="info-item">
               <span className="label">Status:</span>
               <span className={`value ${status.className}`}>{status.text}</span>
+            </div>
+            <div className="info-item evaluation-item">
+              <span className="label">Engine Eval:</span>
+              <span className="value">{renderEvaluation()}</span>
+            </div>
+            <div className="evaluation-bar">
+              <div className="evaluation-bar-fill" style={{ width: `${evaluationValue}%` }} />
             </div>
           </div>
 
@@ -319,12 +384,50 @@ function GameScreen({ botDifficulty, playerColor, onExit }: GameScreenProps) {
               New Game
             </button>
             <button
+              className="btn btn-outline"
+              onClick={requestHint}
+              disabled={!isPlayerTurn || isBotThinking}
+            >
+              Get Hint
+            </button>
+            {hintMove && (
+              <div className="hint-display">
+                <span>Best move: {hintMove}</span>
+                <button className="btn btn-link" onClick={clearHint}>
+                  Clear
+                </button>
+              </div>
+            )}
+            <button
               className="btn btn-danger"
               onClick={handleResign}
               disabled={gameStatus !== 'playing' && gameStatus !== 'check'}
             >
               Resign
             </button>
+          </div>
+
+          <div className="card">
+            <div className="card-title">Analysis & PGN</div>
+            <textarea
+              className="pgn-textarea"
+              value={pgnInput}
+              onChange={(event) => setPgnInput(event.target.value)}
+              rows={8}
+            />
+            <div className="pgn-actions">
+              <button className="btn btn-secondary" onClick={handleCopyPgn} disabled={!pgn}>
+                Copy PGN
+              </button>
+              <button className="btn btn-outline" onClick={handleLoadPgn}>
+                Load PGN
+              </button>
+            </div>
+            {engineEvaluation.pv && (
+              <div className="pv-line">
+                <strong>PV:</strong> {engineEvaluation.pv}
+              </div>
+            )}
           </div>
         </div>
 
