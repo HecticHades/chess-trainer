@@ -81,6 +81,18 @@
   background: #d32f2f;
 }
 
+.btn-link {
+  background: transparent;
+  border: none;
+  color: var(--accent-primary);
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+.btn-link:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
 /* Cards */
 .card {
   background: var(--bg-secondary);
